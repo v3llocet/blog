@@ -1,0 +1,66 @@
+---
+title: Component Lab
+date: 2026-04-10
+tags:
+  - Components
+  - Media
+  - 2026
+---
+
+import CaptionImage from '@site/src/components/CaptionImage'
+import Flex from '@site/src/components/Flex'
+
+# Component Lab
+
+This post exercises the reusable MDX components already wired into the site.
+
+<!-- truncate -->
+
+## Caption Image
+
+<CaptionImage
+  src="https://avatars.githubusercontent.com/u/108526529?s=400&u=824c07b5f7326274238227713d17d3e53e83f6dd&v=4"
+  alt="v3llocet"
+  caption="v3llocet Loves You !!!"
+  width={180}
+/>
+
+## Side-by-Side Layout
+
+<Flex justifyContent="space-between">
+  <>
+    <div style={{ width: '48%' }}>
+      <TerminalFrame title="left-pane" prompt="left$">
+        <p>Useful for notes, warnings, or command output.</p>
+      </TerminalFrame>
+    </div>
+    <div style={{ width: '48%' }}>
+      <TerminalFrame title="right-pane" prompt="right$">
+        <ul>
+          <li>Custom MDX component</li>
+          <li>Responsive terminal panel</li>
+          <li>Readable in light and dark themes</li>
+        </ul>
+      </TerminalFrame>
+    </div>
+  </>
+</Flex>
+
+## Mixed Content
+
+<TerminalFrame title="content-check" prompt="lab$">
+  <>
+    <p>This frame can contain regular prose, lists, or any other block content.</p>
+    <ul>
+      <li>Monospace typography</li>
+      <li>Terminal chrome</li>
+      <li>Subtle glow treatment</li>
+    </ul>
+  </>
+</TerminalFrame>
+
+## Reference
+
+- [MDX Showcase](/2026/04/10/mdx-showcase)
+- [Tags](/tags)
+- [Archive](/archive)
