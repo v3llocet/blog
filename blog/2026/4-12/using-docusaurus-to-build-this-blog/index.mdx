@@ -1,0 +1,195 @@
+---
+title: Using Docusaurus to Build This Blog
+date: 2026-04-11
+description: "From hesitation to launching a personal blog using Docusaurus"
+tags:
+  - Blog
+  - Github
+  - Vercel
+  - 2026
+---
+
+# Using Docusaurus to Build This Blog
+
+For a long time, I had this idea stuck in my head:
+> I should share my thoughts, setups, tips, and solutions with others. 
+>
+> — Wise me
+
+But I never actually acted on it.
+
+<!-- truncate -->
+Why?
+
+Because I kept convincing myself:
+
+> I should share my thoughts, setups, tips, and solutions with others. 
+>
+> — Dumb me
+
+Which, honestly, is a pretty weak excuse. The internet is filled with tutorials explaining even the most basic things, like printing "Hello World" ( not even in assembly… haha ). So yeah… that reasoning didn’t hold up for long.
+
+---
+
+## Why Not a CMS?
+
+At first, I considered going the easy route with a CMS like WordPress or Wix. They’re popular, accessible, and great for getting started quickly.
+
+But the more I thought about it, the more it felt… off.
+
+I didn’t want to manage my blog through a dashboard UI. I enjoy working with files, Git, and code. I like knowing exactly how things are structured and having full control over how everything looks and behaves.
+
+With most CMS platforms, that level of control often feels either limited or buried under layers of abstraction.
+
+So I decided to skip that route entirely.
+
+---
+
+## Why Docusaurus?
+
+I had previously used Hugo for a documentation website, and it was solid  ( fast, lightweight, and efficient ).
+
+But this time, I wanted to try something different.
+
+That’s how I ended up with Docusaurus.
+
+It struck a great balance:
+- Writing content is easy thanks to Markdown and MDX  
+- It’s built on React, which opens the door for deeper customization  
+- The documentation is clear and well-structured (which saves *a lot* of time)
+
+It just felt right.
+
+---
+
+## Initial Template
+
+I didn’t want to build everything from scratch.
+
+So I started exploring.
+
+The Docusaurus showcase was a good starting point to see real-world examples. From there, I went down the GitHub rabbit hole, searching for minimal and clean blog templates.
+
+Eventually, I found this:
+
+[https://github.com/m1m0zzz/blog](https://github.com/m1m0zzz/blog)
+
+Simple. Clean. No unnecessary complexity.
+
+Exactly what I needed to get started without overthinking design or structure.
+
+---
+
+## Setup
+
+Getting started was straightforward.
+
+First, I cloned the repository:
+
+```bash
+git clone https://github.com/m1m0zzz/blog.git
+cd blog
+```
+
+Then installed the dependencies:
+
+```bash
+npm install
+# or
+yarn install
+```
+
+And finally, started the development server:
+
+```bash
+npm run start
+```
+
+Just like that, the blog was running locally at:
+
+http://localhost:3000
+
+Seeing it live for the first time was surprisingly motivating.
+
+---
+
+## Add some changes
+
+Once everything was up and running, I started customizing.
+
+Nothing too crazy.. just small, intentional changes:
+- Tweaked the theme and colors to match my vibe  
+- Adjusted the structure slightly  
+- Added an archive section  
+- Add search content 
+- Removed what I didn’t need  
+
+Little by little, it started to feel personal..
+
+---
+
+## Push it
+
+After customizing the project, I wanted to make it officially mine.
+
+So I created a new GitHub repository and pushed everything:
+
+```bash
+git init
+git remote add origin https://github.com/v3llocet/blog.git
+git add .
+git commit -m "Init"
+git push -u origin main
+```
+
+---
+
+## Deployment with Vercel
+
+For deployment, I wanted something simple and painless.
+
+Vercel was the obvious choice.
+
+I connected my GitHub repository, clicked deploy, and let it handle everything. No complicated setup, no unnecessary friction.
+
+---
+
+## Going Live
+
+![Demo GIF](https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExN2hobzd0cXczZmRzOTAwc2RtZ3dhZGpvemd6OW56dmJ3OWticXNrZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/CK0Eg2ymtfzTO2yVJD/giphy.gif)
+
+I picked a simple subdomain:
+
+[https://v3llocet.vercel.app](https://www.youtube.com/watch?v=dQw4w9WgXcQ) ( you’re already in, no need to click. )
+
+And that was it.
+
+The blog was live.
+
+Simple…
+
+---
+
+## Final Thoughts
+
+Starting a blog isn’t hard.
+
+What’s actually hard is starting for real, staying consistent, and being okay with sharing your work publicly.. even when it’s not perfect.
+
+This blog won’t be perfect.
+
+It will be a mix of experiments, problem-solving, learning notes, and real setups. Sometimes messy, sometimes clean.. but always honest.
+
+---
+
+## What’s Next?
+
+I’ll be sharing more about Problem Solving, CTF writeups, Debugging experiences, and Tools that make life easier.
+
+If you’re thinking about starting a blog too… just start.
+
+Don’t wait for the perfect moment.
+
+It doesn’t exist.
+
+See you in the next post 👋

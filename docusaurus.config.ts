@@ -41,6 +41,9 @@ const config: Config = {
             [npm2yarn, {sync: true}],
           ],
           rehypePlugins: [rehypeKatex],
+          exclude: [
+            '**/showcase/**',
+          ]
         },
         theme: {
           customCss: './src/css/custom.css',
@@ -108,7 +111,7 @@ const config: Config = {
       },
       {
         name: 'description',
-        content: 'A dark terminal-styled hacker blog with neon green cyberpunk accents.',
+        content: "V3llocet's Blog Blue",
       },
     ],
     colorMode: {
