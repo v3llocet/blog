@@ -1,0 +1,785 @@
+---
+title: phishing - amendes-justice-gov
+date: 2026-04-13
+description: "Technical analysis of the amendes-justice-gov.xxx phishing infrastructure, with explanation of the methodology and reasoning behind each step."
+tags:
+  - Blog
+  - Security Research
+  - Phishing
+  - Reverse Engineering
+---
+
+import CaptionImage from '@site/src/components/CaptionImage'
+import Flex from '@site/src/components/Flex'
+
+# Introduction
+
+This article documents the analysis of a phishing infrastructure using the `amendes-justice-gov.xxx` naming pattern. The objective was not only to collect indicators, but also to understand the campaign logic, the operator workflow, and the technical design choices behind the phishing kit.
+
+The methodology followed a simple sequence:
+
+1. enumerate exposed routes and domains;
+2. identify which hosts were really active;
+3. group infrastructure by DNS and hosting patterns;
+4. inspect browser traffic;
+5. reverse the client-side logic;
+6. understand how data was collected and transmitted.
+
+This sequence matters because every step answers a different question. Enumeration tells us where the campaign lives. Traffic analysis tells us how it works. Reversing tells us what the operator is actually collecting.
+
+<!-- truncate -->
+
+---
+
+# Enumerations
+
+### Endpoints (/--tlds--)
+
+The first thing we wanted to understand was whether this phishing page was isolated to one route or whether the site exposed several country- or workflow-specific endpoints.
+
+```bash
+ffuf -w tlds.txt -u https://amendes-justice-gov.beauty/FUZZ/ -fs 0 -mc 200,204,301,302,307,401,403
+```
+
+The logic here was simple: if the operator used a shared template for multiple targets, different paths might reveal country codes, internal routes, or alternate workflow stages.
+
+Using `ffuf` on the path let me test many possible route names quickly. The interesting result was that `/ma/` appeared to be the meaningful route.
+
+That matters because `/ma/` is a strong geographical clue. It suggests the workflow was built for Morocco, not just as a random fake payment page. In phishing investigations, even a small routing detail can tell you who the lure is trying to reach.
+
+<CaptionImage
+  src="/img/ffuf_endpoint.png"
+  alt="Enumeration endpoints using tlds pattern"
+  caption="Enumeration endpoints using tlds pattern"
+/>
+
+---
+
+### TLD Enumeration
+
+Once `/ma/` was identified as the interesting path, the next question became: is this only one domain, or part of a broader cluster?
+
+```bash
+ffuf -w tlds.txt -u https://amendes-justice-gov.FUZZ/ma/ -fs 0 -mc 200,204,301,302,307,401,403
+```
+
+Instead of fuzzing paths, we fuzzed the TLD itself. The reasoning was that phishing operators often register many variants of the same name across cheap or disposable TLDs. This gives them resilience:
+
+- one domain can be burned while others stay alive;
+- they can rotate links when reports increase;
+- they can keep the same lure structure while moving traffic across domains.
+
+This step was useful because it transformed the investigation from `one suspicious website` into `one phishing infrastructure pattern deployed across many domains.`
+
+<CaptionImage
+  src="/img/ffuf_tlds.png"
+  alt="Enumeration TLDs"
+  caption="Enumeration TLDs"
+/>
+
+After removing false positives, the active set looked like this:
+
+<Flex justifyContent="space-between">
+  <>
+    <div style={{ width: '50%' }}>
+
+`https://amendes-justice-gov.asia/ma/`  
+`https://amendes-justice-gov.beauty/ma/`  
+`https://amendes-justice-gov.bar/ma/`  
+`https://amendes-justice-gov.beer/ma/`  
+`https://amendes-justice-gov.best/ma/`  
+`https://amendes-justice-gov.cfd/ma/`  
+`https://amendes-justice-gov.buzz/ma/`  
+`https://amendes-justice-gov.casa/ma/`  
+`https://amendes-justice-gov.cc/ma/`  
+`https://amendes-justice-gov.cyou/ma/`  
+`https://amendes-justice-gov.courses/ma/`  
+`https://amendes-justice-gov.fit/ma/`  
+`https://amendes-justice-gov.hair/ma/`  
+`https://amendes-justice-gov.guru/ma/`  
+`https://amendes-justice-gov.info/ma/`  
+`https://amendes-justice-gov.life/ma/`
+
+    </div>
+    <div style={{ width: '48%' }}>
+
+`https://amendes-justice-gov.live/ma/`  
+`https://amendes-justice-gov.mom/ma/`  
+`https://amendes-justice-gov.one/ma/`  
+`https://amendes-justice-gov.onl/ma/`  
+`https://amendes-justice-gov.pro/ma/`  
+`https://amendes-justice-gov.qpon/ma/`  
+`https://amendes-justice-gov.rest/ma/`  
+`https://amendes-justice-gov.reisen/ma/`  
+`https://amendes-justice-gov.sbs/ma/`  
+`https://amendes-justice-gov.skin/ma/`  
+`https://amendes-justice-gov.vg/ma/`  
+`https://amendes-justice-gov.us/ma/`  
+`https://amendes-justice-gov.watch/ma/`  
+`https://amendes-justice-gov.world/ma/`  
+`https://amendes-justice-gov.work/ma/`
+
+    </div>
+  </>
+</Flex>
+
+> Total active URLs observed: **31**
+
+:::note
+The campaign was not relying on one host. It was using domain spread as an operational strategy. That is an important observation because it tells us something about the actor’s priorities: survivability, fast replacement, and scale.
+:::
+
+---
+
+### DNS Enumeration and Infrastructure Grouping
+
+Once the active domains were identified, the next step was to see whether they pointed to the same backend infrastructure.
+
+```bash
+#!/bin/bash
+
+if [[ $# -ne 2 ]]; then
+  echo "Usage: $0 <tlds_file> <base_domain>"
+  exit 1
+fi
+
+tlds_file="$1"
+base_domain="$2"
+
+if [[ ! -f "$tlds_file" ]]; then
+  echo "Error: File '$tlds_file' not found."
+  exit 1
+fi
+
+for tld in $(cat "$tlds_file"); do
+  domain="${base_domain}.${tld}"
+
+  A=$(dig +short "$domain" A)
+  CNAME=$(dig +short "$domain" CNAME)
+
+  if [[ -n "$A" || -n "$CNAME" ]]; then
+    echo "=== $domain ==="
+
+    if [[ -n "$A" ]]; then
+      echo "A record(s):"
+      echo "$A"
+    fi
+
+    if [[ -n "$CNAME" ]]; then
+      echo "CNAME:"
+      echo "$CNAME"
+    fi
+
+    echo ""
+  fi
+done
+```
+
+TLD enumeration shows which domains are alive. DNS review shows whether those domains belong to the same infrastructure family.
+
+That distinction matters because a phishing brand can attract unrelated lookalikes. If several domains resolve into the same IP ranges, same ASN, or same hosting patterns, confidence increases that they are part of the same operation.
+
+This step also helped eliminate noise. Some domains resolved, but only to parking infrastructure, which created false positives. Cleaning those out was necessary before making claims about the campaign.
+
+<CaptionImage
+  src="/img/dns_enum.png"
+  alt="dns_enum"
+  caption="Enumeration DNS on all TLDs"
+/>
+
+---
+
+### ASN and Hosting Enrichment
+
+After collecting the IPs, we enriched them to identify hosting patterns.
+
+```python
+data = {
+  "amendes-justice-gov.aquila.it": [
+    "172.104.251.198",
+    "172.104.149.86",
+    "172.104.203.186",
+    "139.162.174.209",
+    "139.162.181.76"
+  ],
+  "amendes-justice-gov.asia": ["43.160.248.169"],
+  "amendes-justice-gov.bar": ["43.160.244.74"],
+  "amendes-justice-gov.beauty": ["43.160.244.74"],
+  "amendes-justice-gov.beer": ["43.160.248.169"],
+  "amendes-justice-gov.best": ["43.160.248.169"]...
+}
+
+def get_ip_info(ip):
+    url = f"https://ipinfo.io/{ip}/json"
+    response = requests.get(url, timeout=5)
+    data = response.json()
+
+    return {
+        "ip": ip,
+        "country": data.get("country"),
+        "org": data.get("org"),
+    }
+
+results = []
+
+for domain, ips in data.items():
+    for ip in ips:
+        info = get_ip_info(ip)
+        info["domain"] = domain
+        results.append(info)
+        time.sleep(0.5)
+
+with open("ip_asn_results.json", "w") as f:
+    json.dump(results, f, indent=2)
+
+print("Results saved to ip_asn_results.json")
+```
+
+Enumeration alone gives a surface view. ASN enrichment adds context.
+
+The logic was to answer these questions:
+
+- are these domains scattered across random providers?
+- do they cluster in the same data center space?
+- is there evidence of centralized hosting rather than accidental overlap?
+
+The cleaned results suggested hosting concentrated in Singapore-based data center infrastructure.
+
+That is analytically useful because centralized hosting often implies:
+
+- shared backend administration;
+- one reusable phishing panel;
+- rapid domain replacement without redesigning the backend;
+- campaign management from a common operator environment.
+
+```json title="ip_asn_results.json"
+  [..
+  {
+    "ip": "43.160.221.174",
+    "country": "SG",
+    "org": "AS132203 Tencent Building, Kejizhongyi Avenue",
+    "domain": "amendes-justice-gov.life"
+  },
+  {
+    "ip": "43.160.248.169",
+    "country": "SG",
+    "org": "AS132203 Tencent Building, Kejizhongyi Avenue",
+    "domain": "amendes-justice-gov.live"
+  },
+  ..]
+```
+
+:::note
+There are three main servers based in the Singapore data center `AS132203`.
+- 43.160.248.169
+- 43.160.244.74
+- 43.160.221.174
+:::
+
+A small but useful observation was also preserved:
+
+> Bonus observation: `https://amendes-justice-gov.monster/ma/`
+
+Even if it was not active at the moment of testing, it still fit the same naming and path logic. That makes it interesting as a possible staged or future rotation domain.
+
+---
+
+# Reversing Traffic
+
+After infrastructure work, we moved to browser-side analysis to understand how the phishing page actually collected data.
+
+The key question was whether the form simply submitted once at the end, or whether the page transmitted information continuously during user interaction.
+
+<CaptionImage
+  src="/img/traffic_ws.png"
+  alt="traffic_ws"
+  caption="Traffic WebSocket"
+/>
+
+`https://amendes-justice-gov.beauty/console/...`
+
+## Initial WebSocket messages
+
+```txt title=" Client ← "
+0{"sid":"1a946cc9-602f-41fb-a8ae-0471df4caae2","upgrades":[],"pingInterval":1000,"pingTimeout":3000}
+```
+```txt title=" → Server "
+40
+```
+```txt title=" Client ← "
+42["message","3G0aKk4UDitkLj5n8KkFOMQjiGY9bznvYxLQwuWBYldtIbwGVcypr+na6FOL+yXHCCA9JvaL9/9tDpMhs4mZUUp+bARZGCwaQEnJPecWoO7JcSDUOJwr1MGiwCYbzX/5KGgeDlDNRUK7JqhPC9ajmg=="]
+```
+```txt title=" Client ← "
+40{"sid":"1a946cc9-602f-41fb-a8ae-0471df4caae2"}
+```
+```txt title=" → Server"
+42["message","9J/UwM0nsmrdXqUVWny6zjo8nD559AWv58L4xtEANxJvzzOxau4HFNC5UpSjSiPAtTS4+ZFZhWHeY+ukww708g=="]
+```
+```txt title=" → Server"
+42["message","9J/UwM0nsmrdXqUVWny6zjo8nD559AWv58L4xtEANxIo/NoSHHGPIg7AsS7+tF/PGwBHd9lY6xTj9dmpqbsYbyiCmxdGbmIeqhoyFMYVYdI="]
+```
+
+This immediately changed the character of the investigation.
+
+A traditional phishing page often sends a form only when the victim presses submit. Here, the page opened a WebSocket channel and exchanged structured messages during the session.
+
+That tells us the operator wanted more than final form results. It suggests a collection model with:
+
+- real-time visibility into user actions;
+- incremental field capture;
+- dynamic communication between victim browser and backend panel.
+
+That is a more capable phishing design than a static page.
+
+---
+
+### Understanding the Encryption Logic
+
+At first glance, the `42["message", ...]` payloads were unreadable. The next step was to determine whether they were just encoded, compressed, or actually encrypted.
+
+we tested this by changing field values and comparing the outputs.
+
+```txt title="name : amendes"
+42["message","9J/UwM0nsmrdXqUVWny6zjo8nD559AWv58L4xtEANxIKG2hkdWpjUxPFT83e6Zqt8xNOWjvoA/LqUFDiW0nMBQ=="]
+```
+
+```txt title="name : amendesamendesamendes"
+42["message","9J/UwM0nsmrdXqUVWny6zjo8nD559AWv58L4xtEANxIKG2hkdWpjUxPFT83e6ZqtBbd4HbauOnKxhMxlwdZSS6zDV77VCAA7pJSwf7XI68g="]
+```
+
+The reasoning was based on pattern observation.
+
+When different plaintext values produce ciphertexts with a similar prefix and divergence later, that usually indicates block encryption behavior. It is not something you would expect from plain Base64 encoding or a simple obfuscation routine.
+
+This was the clue that pushed the analysis toward JavaScript reversing instead of just traffic observation.
+
+---
+
+# JavaScript Reversing Logic
+
+The next goal was to find where the client prepared and encrypted the data.
+
+By placing breakpoints around keyboard input handlers and the functions triggered on field changes, we could follow the path from user input to outbound encrypted messages.
+
+## What this revealed
+
+The client-side code:
+
+- watched keyboard activity;
+- listened to field changes;
+- packaged form state into message objects;
+- encrypted those objects before sending them over the WebSocket.
+
+From reversing, the encryption profile resolved to:
+
+<Details summary={<>Javascript Code</>}>
+  <>
+    ```js
+    function fc() {
+    return uc ? lc.exports : (uc = 1,
+    lc.exports = (t = qa(),
+    cc(),
+    void (t.lib.Cipher || function() {
+        var e = t
+          , n = e.lib
+          , r = n.Base
+          , o = n.WordArray
+          , s = n.BufferedBlockAlgorithm
+          , i = e.enc.Base64
+          , a = e.algo.EvpKDF
+          , c = n.Cipher = s.extend({
+            cfg: r.extend(),
+            createEncryptor: function(t, e) {
+                return this.create(this._ENC_XFORM_MODE, t, e)
+            },
+            createDecryptor: function(t, e) {
+                return this.create(this._DEC_XFORM_MODE, t, e)
+            },
+            init: function(t, e, n) {
+                this.cfg = this.cfg.extend(n),
+                this._xformMode = t,
+                this._key = e,
+                this.reset()
+            },
+            reset: function() {
+                s.reset.call(this),
+                this._doReset()
+            },
+            process: function(t) {
+                return this._append(t),
+                this._process()
+            },
+            finalize: function(t) {
+                return t && this._append(t),
+                this._doFinalize()
+            },
+            keySize: 4,
+            ivSize: 4,
+            _ENC_XFORM_MODE: 1,
+            _DEC_XFORM_MODE: 2,
+            _createHelper: function() {
+                function t(t) {
+                    return "string" == typeof t ? v : y
+                }
+                return function(e) {
+                    return {
+                        encrypt: function(n, r, o) {
+                            return t(r).encrypt(e, n, r, o)
+                        },
+                        decrypt: function(n, r, o) {
+                            return t(r).decrypt(e, n, r, o)
+                        }
+                    }
+                }
+            }()
+        });
+      ```
+  </>
+</Details>
+
+- **AES-128**
+- **CBC mode**
+- **PKCS#7 padding**
+- **16-byte key**
+- **16-byte IV**
+- **Base64 ciphertext**
+- **symmetric encryption**
+- **no visible authentication layer**
+
+<CaptionImage
+  src="/img/encryption_decryption.png"
+  alt="Encryption - Decryption"
+  caption="Encryption - Decryption"
+/>
+
+This step explained both the traffic and the operator mindset.
+
+The actor was not using encryption to create a strong secure protocol. The encryption was mainly there to hide collection behavior from casual inspection in developer tools or proxies.
+
+Once the JavaScript was reversed, the protocol became understandable.
+
+---
+
+### Static Key and IV Logic
+
+By stopping execution close to the final encryption step, we found that the client used static key and IV values.
+
+<CaptionImage
+  src="/img/key_iv_1.png"
+  alt="Key_IV"
+  caption="Key & IV"
+/>
+
+:::note
+| Key (ASCII) | IV (hex) | 
+| --- | --- | 
+| ZQMWLSPXJRDHKTNV | 59478a435546b3a1474fdb0c584c43d2 
+:::
+
+This is one of the biggest weaknesses in the kit.
+
+If the browser can encrypt data, the browser must already contain what is needed to do that encryption. When those values are static and embedded in front-end code, they can be recovered.
+
+That means the operator gets secrecy only against casual observers, not against anyone doing systematic reversing.
+
+It also means defenders can:
+
+- decode traffic once the scheme is understood;
+- recover event structures;
+- compare crypto reuse across variants;
+- use the implementation as a fingerprint for related campaigns.
+
+---
+
+### Plaintext Recovery
+
+After building a local decryption routine, we were able to read the WebSocket traffic in plaintext.
+
+<Details summary={<><b> Plaintext Websocket Messages </b></>}>
+  <>
+    ```txt
+[2026-04-13 07:16:19.821] C-S (key1/iv1)
+{"event":"notice","data":"submitData"}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.822] C-S (key1/iv1)
+{"event":"submitData","data":{"firstName":"Bob","lastName":"Alice","email":"bob@alice.beauty","cardHolder":"ALICE","cardNumber":"4242 4242 4242 4242","expiryDate":"10/28","cvv":"123","code":"","pin":"","customCode":"","expressCvv":""}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.822] C-S (key1/iv1)
+{"event":"changleField","data":{"cardNumber":"4242 4242 4242 4242"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.822] C-S (key1/iv1)
+{"event":"changleField","data":{"cardNumber":""}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.822] C-S (key1/iv1)
+{"event":"changleField","data":{"cardNumber":"4242 4242 4242 424"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.823] C-S (key1/iv1)
+{"event":"changleField","data":{"cvv":"123"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.823] C-S (key1/iv1)
+{"event":"changleField","data":{"cvv":"1"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.824] C-S (key1/iv1)
+{"event":"changleField","data":{"expiryDate":"10/28"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.824] C-S (key1/iv1)
+{"event":"changleField","data":{"expiryDate":"10/2"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.824] C-S (key1/iv1)
+{"event":"changleField","data":{"expiryDate":"10/"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.825] C-S (key1/iv1)
+{"event":"changleField","data":{"expiryDate":"1"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.825] C-S (key1/iv1)
+{"event":"notice","data":"enterCardNumber"}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.825] C-S (key1/iv1)
+{"event":"changleField","data":{"cardNumber":"4242 4242 4242 4242"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.825] C-S (key1/iv1)
+{"event":"changleField","data":{"cardHolder":"ALICE"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.825] C-S (key1/iv1)
+{"event":"changleField","data":{"cardHolder":"ALIC"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.826] C-S (key1/iv1)
+{"event":"changleField","data":{"cardHolder":"AL"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.826] C-S (key1/iv1)
+{"event":"changleField","data":{"cardHolder":"A"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.826] C-S (key1/iv1)
+{"event":"changleField","data":{"router":"支付页"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.826] C-S (key1/iv1)
+{"event":"changleField","data":{"router":"通知页"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.826] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice.beauty"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.827] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice.beaut"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.827] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice.beau"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.827] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice.bea"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.827] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice.be"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.827] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice.b"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.828] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice."}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.828] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alice"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.828] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@alic"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.828] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@ali"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.829] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@al"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.829] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@a"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.829] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob@"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.829] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bob"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.829] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"bo"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.830] C-S (key1/iv1)
+{"event":"changleField","data":{"email":"b"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.830] C-S (key1/iv1)
+{"event":"changleField","data":{"firstName":"Bob"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.830] C-S (key1/iv1)
+{"event":"changleField","data":{"firstName":"Bo"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.830] C-S (key1/iv1)
+{"event":"changleField","data":{"firstName":"B"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.831] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":"Alice"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.831] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":"Alic"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.831] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":"Ali"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.831] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":"Al"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.831] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":"A"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.832] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":""}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.832] C-S (key1/iv1)
+{"event":"changleField","data":{"lastName":"J"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.832] C-S (key1/iv1)
+{"event":"changleField","data":{"router":"资料页"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.832] C-S (key1/iv1)
+{"event":"changleField","data":{"router":"资料页"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.832] C-S (key1/iv1)
+{"event":"changleField","data":{}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.832] S-C (key1/iv1)
+{"data":{"money":"","successUrl":"","currencySymbol":"","products":[]},"event":"userSiteConfig"}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.833] C-S (key1/iv1)
+{"event":"changleField","data":{}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.833] C-S (key1/iv1)
+{"event":"changleField","data":{"router":"首页"}}
+--------------------------------------------------------------------------------
+[2026-04-13 07:16:19.833] S-C (key1/iv1)
+{"data":{"money":"","successUrl":"","currencySymbol":"","products":[]},"event":"userSiteConfig"}
+--------------------------------------------------------------------------------
+
+===== SUMMARY =====
+Total entries       : 52
+Messages extracted  : 52
+Successfully decrypted: 52
+```
+  </>
+</Details>
+
+
+At that point, the objective was no longer just `can the encryption be reversed?` but `what exactly is the phishing panel collecting, and when?`
+
+The decrypted stream showed that the site was sending data continuously, including partial values during typing.
+
+That means the kit was not waiting for a final submit action. It was harvesting progressively.
+
+Representative event types included:
+
+- `submitData`
+- `changleField`
+- `enterCardNumber`
+- `userSiteConfig`
+
+The repeated typo `changleField` is especially interesting because stable typos often become strong kit fingerprints.
+
+#### What the decrypted traffic showed
+
+The backend received:
+
+- first name;
+- last name;
+- email address;
+- cardholder name;
+- payment card number;
+- expiry date;
+- CVV;
+- page routing changes;
+- intermediate edits and backspaces.
+
+This tells us the panel was optimized for maximum recovery.
+
+Even if the victim left before the final step, the operator could still obtain partial or even nearly complete data. The workflow was designed for resilience against abandonment.
+
+That is a more sophisticated collection model than a basic fake payment form.
+
+---
+
+### Additional Encrypted Configuration
+
+A deeper review showed that not everything moved through the same channel in the same form. Some application text and configuration objects were also encrypted separately.
+
+```txt
+"{"uuid":"5767c737-e18d-49f3-8048-efe77e9c2525","router":false,"formInfoFields":["firstName","lastName","email"],"formInfoNextRoute":"payment","currencySymbol":"MAD","money":"350.00","text":{"common":{"logoMain":"Direction generale des finances publiques","logoService":"Centre de traitement des paiements","warningAssistive":"Alerte","importantAssistive":"Important"},"index":{"heroAriaLabel":"Ana sayfa","scamAlert":"Sahte SMS ve e-postalara karsi dikkatli olun.","heroTitle":"Trafik Ceza Sorgulama ve Odeme","heroSubtitle":"Bekleyen cezanizi hizlica sorgulayin ve yasal sure dolmadan odemenizi tamamlayin.","cardTitle":"Islem gerekli","cardSubtitle":"Araciniza ait odenmemis trafik cezasi kaydi tespit edilmistir. Ek ceza ve idari islem uygulanmamasi icin lutfen odemenizi geciktirmeden tamamlayin.","learnMore":"Islem genellikle birkac dakika surer.","btnAccount":"Bilgilerimi dogrula","btnGuest":"Devam et","btnNotice":"Ilerle","violationWarning":"Odenmemis bir trafik cezaniz bulunmaktadir. Lutfen odemenizi derhal yapiniz. Zamaninda odeme yapilmamasi durumunda ek ceza, ehliyet kisitlamasi veya yasal takip sureci baslatilabilir.","authDescription":"Odenmemis bir trafik cezaniz bulunmaktadir. Lutfen hemen odeme yapiniz. Gecikme durumunda ek ucretler ve idari yaptirimlar uygulanabilir.","violationLookupHint":"Ceza kaydinizi sorgulayin:","plateLabel":"Plaka numaranizi giriniz","platePlaceholder":"34 ABC 123","plateRequiredError":"Devam etmek icin lutfen plaka numaranizi giriniz.","authButtonText":"Ceza bildirimlerini goruntule","btnViewViolations":"Ceza bildirimlerini goruntule"},"info":{"title":"Informations de contact","intro1":"","intro2":"","formButton":"Valider","contactButton":"Contacter l'administration fiscale","fieldLabels":{"fullName":"Nom complet","address":"Adresse","city":"Ville","state":"Region / Province","zipCode":"Code postal","email":"Adresse e-mail","phone":"Numero de telephone"},"placeholders":{"fullName":"Nom complet","address":"Adresse ou numero de voie","city":"Ville","state":"Region / Province","zipCode":"Code postal","email":"Adresse e-mail","phone":"Numero de telephone"}},"payment":{"title":"Guvenli Odeme Cozumu","privacyIntro":"Cezanizi korumali altyapida guvenli sekilde odeyin. Kisisel verileriniz gizlilik kapsaminda korunur.","footerBlurb":"Odeme islemleriniz sifreli baglanti ile islenir. Islemi tamamladiktan sonra onay bilgisi sistemde kaydedilir.","formButton":"Odemeyi tamamla","payButtonPrefix":"Ode","summaryLabel":"Odenecek tutar","privacyText":"Cezanizi korumali altyapida guvenli sekilde odeyin. Kisisel verileriniz gizlilik kapsaminda korunur.","acceptedCardsLabel":"Desteklenen kartlar","personalTaxInfoTitle":"Odeme bilgileri","taxYearLabel":"Donem","taxYearValue":"March 2026","statusLabel":"Durum","statusValue":"Odeme bekleniyor","refundAmountLabel":"Odenecek tutar","methodOfRefundTitle":"Odeme yontemi","directDepositTitle":"Banka havalesi","radioSelectTitle":"Lutfen bu secenegi secin","bankRoutingLabel":"Banka bilgileri","systemMaintenanceNote":"","creditDebitCardLabel":"Kredi veya banka karti","acceptedCardsText":"Visa, Mastercard, American Express ve diger kartlarla guvenli odeme.","cardHolderPlaceholder":"Kart sahibinin adini giriniz","cardHolderLabel":"Kart sahibi adi","cardNumberLabel":"Kart numarasi","expiryDateLabel":"Son kullanma tarihi","cvvLabel":"CVV"},"success":{"title":"Odeme basarili","lead":"Trafik cezasi odemeniz basariyla isleme alindi. Fines SA uzerinden guvenli, dogrulanmis ve mevzuata uygun odeme yaptiginiz icin tesekkur ederiz.","summaryTitle":"Odeme ozeti","summaryAmountLabel":"Odenen tutar","summaryReferenceLabel":"Odeme referansi","summaryReferenceValue":"FSA-847291063","summaryDateLabel":"Odeme tarihi","summaryStatusLabel":"Durum","summaryStatusValue":"Onaylandi","summaryText":"Onay bilgilendirmesi, belirttiginiz e-posta adresine gonderilecektir. Lutfen odeme referansinizi kayitlariniz ve Fines SA ile yapilacak olasi iletisimler icin saklayin.","infoTitle":"Onemli","infoBody":"Sizden odeme kaniti gostermeniz istenirse bu onayi saklayin veya bizimle iletisime gecerken odeme referansinizi belirtin."}},"pages":{"notice":{"progressAriaLabel":"Progression","countryAriaLabel":"Pays","requiredTitle":"obligatoire","tableAriaLabel":"Trafik ceza bildirim detaylari","infoBannerTitle":"Informations client","infoBannerBody":"Attention aux SMS et e-mails frauduleux. SANEF N'ENVOIE JAMAIS DE SMS POUR DEMANDER UN PAIEMENT. Ne communiquez jamais vos coordonnees bancaires ou codes de paiement apres un message non sollicite.","pageTitle":"","noticeHeaderTitle":"Bekleyen Cezalar","noticeLogoTagline":"Smart • Secure • Save","step1Label":"Mes peages","step2Label":"Paiement","cardTitle":"Identification","delayWarning":"Les trajets a regler peuvent mettre jusqu'a 24 heures a apparaitre","countryLabel":"Pays","countryValue":"France","plateLabel":"Plaque d’immatriculation","platePlaceholder":"AA123BB","rentalCheckbox":"Il s'agissait d'un vehicule de location","checkTripsButton":"Verifier mes trajets a regler","legalText":"","disclaimerAfterImportant":" Mevcut mevzuata gore, ihlali yapan kisi ilk uc gun icinde odeme yaparsa tutar asgari miktarin %50'si oraninda azaltilir. Trafik cezasinin zamaninda odenmemesi ek masraflara ve ulasim kisitlamalarina neden olur.","importantLabel":"ONEMLI:","violationDescription":"60 km/s hız sınırında 74 km/s hızla araç kullanmak","citationNumber":"1424581679999145","demeritPointsDisplay":"-","originalPenaltyAmount":"600","nextStepButton":"Sonraki Adim","privacyLink":"Politique de confidentialite","faqTitle":"FAQ","faqItems":[{"q":"Comment etre informe des peages en attente de paiement ?","a":"Vous pouvez activer les alertes dans votre espace client ou consulter regulierement votre historique apres le passage sur un peage en flux libre."},{"q":"Pourquoi mes trajets en flux libre n'apparaissent-ils pas ?","a":"Les donnees peuvent mettre jusqu'a 24 heures a remonter. Verifiez egalement que la plaque saisie est correcte."},{"q":"Pourquoi ne puis-je pas voir plus de details sur mes trajets ?","a":"Pour des raisons de confidentialite et de facturation, seules des informations de synthese sont affichees a cette etape. Des details supplementaires sont disponibles apres identification."},{"q":"Que se passe-t-il en cas de non-paiement d'un trajet en flux libre ?","a":"Les trajets impayes peuvent entrainer des relances, des majorations et des procedures de recouvrement conformement a la reglementation autoroutiere en vigueur."}],"totalDueLabel":"Montant total du :","amountPlaceholder":"--,--","showConfigAmount":false,"chooseCardButton":"Choisir une carte","plateRowLabel":"PLAKA","descriptionRowLabel":"Aciklama","deadlineRowLabel":"Son Odeme Tarihi","citationRowLabel":"Ceza Numarasi","demeritPointsLabel":"Ceza Puani","originalPenaltyLabel":"Ilk Ceza Tutari","revisedPenaltyLabel":"Indirimli Ceza Tutari"}},"__setting_config":true}"
+```
+
+:::note
+| Key 2 (ASCII) | IV 2 (hex) | 
+| --- | --- | 
+| NLFRWBHXVQJTCPYK | 444d6f67535646694f4d6c554e4d7243 
+:::
+
+
+This revealed that the phishing page behaved more like a configurable application than a hard-coded static page.
+
+Recovered configuration data included:
+
+- workflow routing;
+- form field definitions;
+- localized text;
+- payment labels;
+- warning text;
+- page content;
+- amount configuration.
+
+This means the operator likely had a reusable template where text, routes, and campaign presentation could be adapted without redesigning the whole site.
+
+---
+
+### Localization Clues
+
+The recovered text contained a mix of French, Turkish, and some Chinese-linked Uwe values.
+
+Language collisions like this often reveal reuse.
+
+They suggest that the kit was not developed specifically for only one target from scratch. Instead, it likely came from a reusable template or shared codebase that had been adapted across multiple campaigns or regions.
+
+For analysis, this helps move the conclusion away from `one fake page` and toward `one reusable phishing framework.`
+
+---
+
+# Security Analysis
+
+1. `The campaign used scale as protection`
+
+The many TLD variants show that the operator did not rely on stealth alone. They relied on infrastructure spread and replacement capacity.
+
+2. `The page collected data before final submission`
+
+This is one of the most important findings. The panel captured value while the victim typed, which reduced the operator’s dependence on full form completion.
+
+3. `The encryption was operational, not robust`
+
+The actor used encryption to conceal the workflow from simple inspection, but static client-side cryptographic material made the scheme recoverable.
+
+4. `The kit appears reusable and template-based`
+
+The routing model, repeated event names, encrypted config objects, and multilingual remnants all suggest a reusable phishing application rather than a one-off manually crafted lure.
+
+5. `Small implementation details became strong fingerprints`
+
+The `/ma/` route, the `changleField` typo, the WebSocket framing, and the crypto pattern are all useful artifacts for clustering and future detection.
+
+---
+
+# Conclusion
+
+The `amendes-justice-gov.xxx` infrastructure appears to be a structured phishing operation built around scalable deployment, real-time collection, and a reusable client-side application.
+
+The logic of the investigation moved from surface discovery to deeper protocol understanding:
+
+- first, identify where the campaign lives;
+- then, prove which infrastructure belongs together;
+- next, inspect how the victim browser communicates;
+- finally, reverse the client logic to reveal what is being collected.
+
+The most important result is that the phishing page did not simply impersonate a payment site visually. It implemented a live collection workflow that transmitted victim data progressively over encrypted WebSocket messages.
+
+That makes the infrastructure more informative for defenders, because once the client-side logic is reversed, the campaign exposes not only its domains, but also its internal workflow, event structure, and collection strategy.
+

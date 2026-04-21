@@ -624,7 +624,7 @@ samp {
 pre {
   background: var(--terminal-code-bg);
   border-radius: 12px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .theme-code-block,
@@ -750,7 +750,7 @@ button.button--secondary {
   margin: 1.5rem 0;
   background: var(--terminal-panel);
   border-radius: 12px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .terminal-frame__header {

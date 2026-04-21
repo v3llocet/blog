@@ -10,7 +10,7 @@ export default function CaptionImage({ src, caption, alt, width, height }: Props
   return (
     <figure>
       <img src={src} alt={alt || caption} width={width} height={height} />
-      <figcaption><b>{caption}</b></figcaption>
+      <figcaption>{caption}</figcaption>
     </figure>
   );
 }
